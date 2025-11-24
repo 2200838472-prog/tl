@@ -1,0 +1,7 @@
+{
+  "name": " 中宫",
+  "description": "A mystical dual-system Tarot application featuring Thoth and Waite decks, integrated with Gemini AI for deep philosophical interpretation using Heaven/Earth/Man and Kabbalah frameworks.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
