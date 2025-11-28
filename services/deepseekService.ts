@@ -45,8 +45,21 @@ function cleanText(text: string): string {
 // Helper for calling DeepSeek API via Backend Proxy (Preferred) or Direct (Fallback)
 async function callDeepSeek(messages: any[], maxTokens = 3000, jsonMode = false) {
     
+    // CRITICAL FIX: DeepSeek requires "json" in the system prompt if response_format is json_object
+    if (jsonMode) {
+        const hasSystemJson = messages.some(m => m.role === 'system' && (m.content.toLowerCase().includes('json')));
+        if (!hasSystemJson) {
+            // Inject system prompt at the beginning
+            messages.unshift({
+                role: 'system',
+                content: 'You are a helpful assistant. You must output your response in valid JSON format.'
+            });
+        }
+    }
+
     // 1. Try Backend Proxy first (Best for CORS & Security)
     try {
+        // Relative path works best for Vercel rewrites
         const proxyResponse = await fetch('/api/deepseek/interpret', {
             method: 'POST',
             headers: {
@@ -75,7 +88,7 @@ async function callDeepSeek(messages: any[], maxTokens = 3000, jsonMode = false)
         console.warn("Proxy unreachable, trying direct connection...");
     }
 
-    // 2. Fallback: Direct API Call (Might fail due to CORS)
+    // 2. Fallback: Direct API Call (Might fail due to CORS on some browsers)
     if (!DEEPSEEK_API_KEY) {
         throw new Error("Missing DeepSeek API Key");
     }
@@ -262,11 +275,12 @@ export const generateTestQuestion = async (level: number, system: Interpretation
             difficultyDesc = "Level 3 (Adept - 熟手): 考察实战应用。在特定场景下某张牌的解读，或元素互动逻辑。";
             break;
         case 4:
-            difficultyDesc = "Level 4 (Master - 世界大师水准): 极高难度的神秘学考据。必须考察金色黎明（Golden Dawn）体系的底层严密数据。例如：占星度数（Decans）、希伯来字母及数值、生命之树路径编号、天使名号。";
-            focusArea = "Esoteric Correspondence (Qabalah/Astrology/Decans)";
+            // Strengthened for Master Level as requested
+            difficultyDesc = "Level 4 (Master - 世界大师水准): 极高难度的神秘学考据。必须严格考察金色黎明（Golden Dawn）体系的底层严密数据。例如：占星度数（Decans）、希伯来字母及数值（Gematria）、生命之树具体路径编号（11-32路径）、天使名号（Shem HaMephorash）、颜色阶梯（King/Queen Scale）。这些是区分“爱好者”和“学院派大师”的硬指标。禁止提问通用含义，必须提问具体对应关系。";
+            focusArea = "Golden Dawn Correspondences & Qabalah";
             break;
         case 5:
-            difficultyDesc = "Level 5 (Grandmaster - 宗师): 考察哲学综合与体系比较。要求解释塔罗牌设计背后的神学/哲学原理。";
+            difficultyDesc = "Level 5 (Grandmaster - 宗师): 考察哲学综合与体系比较。要求解释塔罗牌设计背后的神学/哲学原理，如透特之书与韦特塔罗在宇宙论上的差异。";
             focusArea = "Philosophy, Theology & System Synthesis";
             break;
         default:
@@ -281,15 +295,15 @@ export const generateTestQuestion = async (level: number, system: Interpretation
     语言：中文
     
     指令：
-    1. **严格分级**。Level 4 必须是针对'世界级塔罗大师'的考题。
+    1. **严格分级**。Level 4 必须是针对'世界级塔罗大师'的硬核考题，涉及具体数据和对应关系。
     2. 题目要随机多变，拒绝陈词滥调。
     3. 这是一个简答题，不要提供选项。
-    4. 请直接返回JSON。
-    
-    格式：{"question": "问题内容..."}`;
+    4. 请直接返回JSON格式：{"question": "问题内容..."}。
+    `;
 
     try {
         // Test questions use direct call usually as they are simpler/shorter
+        // callDeepSeek will inject the JSON system prompt automatically now
         const aiResponse = await callDeepSeek([
             { role: 'user', content: prompt }
         ], 1000, true);
@@ -316,7 +330,7 @@ export const evaluateTestAnswer = async (question: string, userAnswer: string, l
       考生回答："${userAnswer}"
       
       评分标准（满分100，及格60）：
-      Level 4 为零容忍模式。如果考生回答模糊、错误、或者仅凭直觉作答而没有列出准确的神秘学术语，直接判定不及格。
+      Level 4 为零容忍模式。如果考生回答模糊、错误、或者仅凭直觉作答而没有列出准确的神秘学术语（如希伯来字母、具体度数、颜色阶梯），直接判定不及格（分数<60）。
       
       请返回纯JSON格式：
       {"score": 数字, "feedback": "简短的中文评价"}

@@ -1,8 +1,23 @@
 import express from 'express';
 import cors from 'cors';
-import fetch from 'node-fetch';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+// Conditional import for node-fetch to support older Node versions if needed,
+// though Vercel environment usually has global fetch in Node 18+.
+// We use a try-catch to allow using global fetch if available.
+let fetch;
+if (typeof globalThis.fetch === 'function') {
+    fetch = globalThis.fetch;
+} else {
+    // Dynamic import to avoid build issues if node-fetch is missing in some envs
+    try {
+        const module = await import('node-fetch');
+        fetch = module.default;
+    } catch (e) {
+        console.warn("Native fetch not found and node-fetch import failed.");
+    }
+}
 
 // Helper for __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -22,7 +37,6 @@ app.use(express.json());
 
 // --- MOCK DATABASE (In-Memory) ---
 // Note: On Vercel, this memory resets on every redeploy or cold start.
-// For production, connect to an external database like MongoDB or PostgreSQL.
 const ADMIN_SESSIONS = new Set();
 
 // --- API ROUTES ---
@@ -41,12 +55,16 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 // 2. DeepSeek Proxy: Interpretation
-// This is crucial for public deployment to avoid CORS issues and hide the API Key
+// Matches Vercel rewrite rules (/api/(.*) -> /api/index.js -> app)
 app.post('/api/deepseek/interpret', async (req, res) => {
     const { messages, maxTokens, jsonMode } = req.body;
     
     if (!messages) {
         return res.status(400).json({ error: "Messages required" });
+    }
+
+    if (!fetch) {
+        return res.status(500).json({ error: "Server fetch capability missing" });
     }
 
     try {
@@ -73,6 +91,13 @@ app.post('/api/deepseek/interpret', async (req, res) => {
         }
 
         const data = await response.json();
+        
+        // DeepSeek response structure validation
+        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+            console.error("Invalid Upstream Response:", data);
+            return res.status(502).json({ error: "Invalid response from AI provider" });
+        }
+
         // Return just the content to match expected format
         res.json({ content: data.choices[0].message.content });
 
@@ -104,6 +129,10 @@ app.get('/api/admin/stats', (req, res) => {
 if (!process.env.VERCEL) {
     app.use(express.static(path.join(__dirname, 'dist')));
     app.get('*', (req, res) => {
+      // Don't intercept API calls
+      if (req.path.startsWith('/api')) {
+          return res.status(404).json({ error: "Not Found" });
+      }
       res.sendFile(path.join(__dirname, 'dist/index.html'));
     });
 }
