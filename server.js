@@ -28,7 +28,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 // Prioritize env var, then fallback
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || 'sk-3c0c5f5063fa47d6a07f73692db9482e';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'HHyyaa2006'; // Updated to specific requirement
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 
 // Middleware
@@ -45,7 +45,7 @@ const ADMIN_SESSIONS = new Set();
 app.post('/api/admin/login', (req, res) => {
     const { username, password } = req.body;
     
-    if (username === 'admin' && password === ADMIN_PASSWORD) {
+    if (username === 'HHyyaa2006' && password === ADMIN_PASSWORD) {
         const token = 'mock-jwt-token-' + Date.now();
         ADMIN_SESSIONS.add(token);
         return res.json({ success: true, token });
@@ -57,7 +57,7 @@ app.post('/api/admin/login', (req, res) => {
 // 2. DeepSeek Proxy: Interpretation
 // Matches Vercel rewrite rules (/api/(.*) -> /api/index.js -> app)
 app.post('/api/deepseek/interpret', async (req, res) => {
-    const { messages, maxTokens, jsonMode } = req.body;
+    const { messages, maxTokens, jsonMode, temperature } = req.body;
     
     if (!messages) {
         return res.status(400).json({ error: "Messages required" });
@@ -77,7 +77,7 @@ app.post('/api/deepseek/interpret', async (req, res) => {
             body: JSON.stringify({
                 model: 'deepseek-chat',
                 messages: messages,
-                temperature: 0.7,
+                temperature: temperature || 0.7, // Allow client to control randomness
                 max_tokens: maxTokens || 3000,
                 stream: false,
                 response_format: jsonMode ? { type: 'json_object' } : undefined

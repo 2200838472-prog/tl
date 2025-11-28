@@ -22,15 +22,23 @@ function extractJSON(text: string): any {
     try {
         return JSON.parse(text);
     } catch (e) {
-        const clean = text.replace(/```json|```/g, '').trim();
+        // Common issue: Markdown code blocks
+        const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
         try {
             return JSON.parse(clean);
         } catch (e2) {
-            const match = text.match(/\{[\s\S]*\}/);
-            if (match) {
-                return JSON.parse(match[0]);
+            // Find first { and last }
+            const start = text.indexOf('{');
+            const end = text.lastIndexOf('}');
+            if (start !== -1 && end !== -1) {
+                const jsonStr = text.substring(start, end + 1);
+                try {
+                    return JSON.parse(jsonStr);
+                } catch (e3) {
+                     throw new Error("DeepSeek response did not contain valid JSON.");
+                }
             }
-            throw new Error("No valid JSON found in response");
+            throw new Error("No valid JSON structure found in response");
         }
     }
 }
@@ -43,11 +51,12 @@ function cleanText(text: string): string {
 }
 
 // Helper for calling DeepSeek API via Backend Proxy (Preferred) or Direct (Fallback)
-async function callDeepSeek(messages: any[], maxTokens = 3000, jsonMode = false) {
+// Added 'temperature' parameter to control creativity vs strictness
+async function callDeepSeek(messages: any[], maxTokens = 3000, jsonMode = false, temperature = 0.7) {
     
     // CRITICAL FIX: DeepSeek requires "json" in the system prompt if response_format is json_object
     if (jsonMode) {
-        const hasSystemJson = messages.some(m => m.role === 'system' && (m.content.toLowerCase().includes('json')));
+        const hasSystemJson = messages.some((m: any) => m.role === 'system' && (m.content.toLowerCase().includes('json')));
         if (!hasSystemJson) {
             // Inject system prompt at the beginning
             messages.unshift({
@@ -68,7 +77,8 @@ async function callDeepSeek(messages: any[], maxTokens = 3000, jsonMode = false)
             body: JSON.stringify({
                 messages,
                 maxTokens,
-                jsonMode
+                jsonMode,
+                temperature
             })
         });
 
@@ -102,7 +112,7 @@ async function callDeepSeek(messages: any[], maxTokens = 3000, jsonMode = false)
         body: JSON.stringify({
             model: 'deepseek-chat',
             messages: messages,
-            temperature: 0.7,
+            temperature: temperature,
             max_tokens: maxTokens,
             stream: false,
             response_format: jsonMode ? { type: 'json_object' } : undefined
@@ -137,7 +147,7 @@ export const generateInterpretation = async (request: ReadingRequest): Promise<F
             role: 'user',
             content: prompt
           }
-    ], 3000, true); 
+    ], 3000, true, 0.7); // Standard creative temperature
     
     return parseAIResponse(aiResponse, request);
     
@@ -298,15 +308,15 @@ export const generateTestQuestion = async (level: number, system: Interpretation
     1. **严格分级**。Level 4 必须是针对'世界级塔罗大师'的硬核考题，涉及具体数据和对应关系。
     2. 题目要随机多变，拒绝陈词滥调。
     3. 这是一个简答题，不要提供选项。
-    4. 请直接返回JSON格式：{"question": "问题内容..."}。
+    4. 务必返回合法的 JSON 格式，不要包含 Markdown 标记：
+    {"question": "问题内容..."}
     `;
 
     try {
-        // Test questions use direct call usually as they are simpler/shorter
-        // callDeepSeek will inject the JSON system prompt automatically now
+        // High temperature for randomness (0.9)
         const aiResponse = await callDeepSeek([
             { role: 'user', content: prompt }
-        ], 1000, true);
+        ], 1000, true, 0.9);
 
         const json = extractJSON(aiResponse);
         
@@ -332,14 +342,15 @@ export const evaluateTestAnswer = async (question: string, userAnswer: string, l
       评分标准（满分100，及格60）：
       Level 4 为零容忍模式。如果考生回答模糊、错误、或者仅凭直觉作答而没有列出准确的神秘学术语（如希伯来字母、具体度数、颜色阶梯），直接判定不及格（分数<60）。
       
-      请返回纯JSON格式：
+      请务必返回合法的 JSON 格式，不要包含 Markdown 标记：
       {"score": 数字, "feedback": "简短的中文评价"}
     `;
 
     try {
+        // Low temperature for strictness and consistency (0.3)
         const aiResponse = await callDeepSeek([
             { role: 'user', content: prompt }
-        ], 1000, true);
+        ], 1000, true, 0.3);
         
         const json = extractJSON(aiResponse);
         
@@ -356,7 +367,8 @@ export const evaluateTestAnswer = async (question: string, userAnswer: string, l
 export const generateReferenceAnswer = async (question: string, level: number): Promise<string> => {
     const prompt = `请给出这个塔罗问题的标准答案（难度 ${level}）。问题："${question}"。中文，50字以内，精准概括。`;
     try {
-        return await callDeepSeek([{ role: 'user', content: prompt }], 500, false);
+        // Balanced temperature (0.5)
+        return await callDeepSeek([{ role: 'user', content: prompt }], 500, false, 0.5);
     } catch(e) {
         throw e;
     }
