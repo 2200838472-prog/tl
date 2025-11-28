@@ -1,6 +1,7 @@
 import { ReadingRequest, FullReadingResponse, CardInterpretation, InterpretationMode } from '../types';
 
 // Robust key retrieval: Try process.env, then Vite import.meta, then fallback to the provided key
+// Note: On a public client-side deployment, this key might be visible if not using the proxy.
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || (import.meta as any).env?.VITE_DEEPSEEK_API_KEY || 'sk-3c0c5f5063fa47d6a07f73692db9482e';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 
@@ -19,15 +20,12 @@ export interface TestEvaluation {
 // Helper to extract JSON from text
 function extractJSON(text: string): any {
     try {
-        // First try direct parse
         return JSON.parse(text);
     } catch (e) {
-        // Try cleaning markdown
         const clean = text.replace(/```json|```/g, '').trim();
         try {
             return JSON.parse(clean);
         } catch (e2) {
-            // Try finding first { and last }
             const match = text.match(/\{[\s\S]*\}/);
             if (match) {
                 return JSON.parse(match[0]);
@@ -37,10 +35,48 @@ function extractJSON(text: string): any {
     }
 }
 
-// Helper for calling DeepSeek API
-async function callDeepSeek(messages: any[], maxTokens = 2000, jsonMode = false) {
+// Helper to clean text according to user specification
+function cleanText(text: string): string {
+    if (!text) return "";
+    let cleaned = text.replace(/[^\u4e00-\u9fa5a-zA-Z0-9\s。\.,，]/g, ' ');
+    return cleaned.trim();
+}
+
+// Helper for calling DeepSeek API via Backend Proxy (Preferred) or Direct (Fallback)
+async function callDeepSeek(messages: any[], maxTokens = 3000, jsonMode = false) {
+    
+    // 1. Try Backend Proxy first (Best for CORS & Security)
+    try {
+        const proxyResponse = await fetch('/api/deepseek/interpret', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                messages,
+                maxTokens,
+                jsonMode
+            })
+        });
+
+        // If proxy exists and works
+        if (proxyResponse.ok) {
+            const data = await proxyResponse.json();
+            return data.content;
+        } else {
+             // If 404, it means we are likely on a static host without the node backend.
+             // We proceed to try direct call.
+             if (proxyResponse.status !== 404) {
+                 console.warn("Proxy Error, falling back to direct:", proxyResponse.status);
+             }
+        }
+    } catch (e) {
+        // Network error to proxy? Fallback.
+        console.warn("Proxy unreachable, trying direct connection...");
+    }
+
+    // 2. Fallback: Direct API Call (Might fail due to CORS)
     if (!DEEPSEEK_API_KEY) {
-        console.warn("DeepSeek API Key is missing.");
         throw new Error("Missing DeepSeek API Key");
     }
 
@@ -53,7 +89,7 @@ async function callDeepSeek(messages: any[], maxTokens = 2000, jsonMode = false)
         body: JSON.stringify({
             model: 'deepseek-chat',
             messages: messages,
-            temperature: 0.7, // Lower temperature for more focused/analytical output
+            temperature: 0.7,
             max_tokens: maxTokens,
             stream: false,
             response_format: jsonMode ? { type: 'json_object' } : undefined
@@ -72,38 +108,33 @@ async function callDeepSeek(messages: any[], maxTokens = 2000, jsonMode = false)
 // --- Divination Functions ---
 
 export const generateInterpretation = async (request: ReadingRequest): Promise<FullReadingResponse> => {
-  // 构建DeepSeek请求的提示词
   const prompt = buildInterpretationPrompt(request);
 
   try {
     const aiResponse = await callDeepSeek([
           {
             role: 'system',
-            content: `你是一位世界级的塔罗大师，精通韦特、透特、卡巴拉及中国哲学（易经/三才）。
-            
-你的解读风格：
-1. **快狠准**：不讲废话，不堆砌辞藻，直击问题核心。
-2. **逻辑严密**：基于元素论、数字学和符号学进行推理，而非单纯的灵感漫谈。
-3. **深度**：拒绝表面化的"看图说话"，深入到能量流动和因果关系的层面。
-4. **客观**：客观陈述利弊，不进行无谓的安慰（Chicken Soup），也不故意恐吓。`
+            content: `你是一位精通DeepSeek推理模型的世界级塔罗大师，擅长融合韦特、透特体系与现代心理学。
+你的解读风格：专业、冷静、共情、中立。
+你拒绝模棱两可的废话，专注于从牌面符号、元素互动和数字脉络中挖掘深层逻辑。
+你将严格按照用户的指令结构进行输出，确保JSON格式合法。
+【重要格式要求】输出的文本中，除空格、句号（。）、逗号（，）外，严禁出现其他任何标点符号（如引号、括号、冒号、分号、破折号等）。`
           },
           {
             role: 'user',
             content: prompt
           }
-    ], 4000, true); // Increased tokens for longer response
+    ], 3000, true); 
     
-    // 解析AI响应
     return parseAIResponse(aiResponse, request);
     
   } catch (error) {
     console.error('DeepSeek API调用失败:', error);
-    throw error; // Strictly throw error, no fallback
+    throw error;
   }
 };
 
 export const generateVisionImage = async (cardNames: string[], question: string): Promise<string | null> => {
-  // Feature removed as requested
   return null;
 };
 
@@ -116,41 +147,64 @@ const buildInterpretationPrompt = (request: ReadingRequest): string => {
     : '卡巴拉生命之树体系（分析从Kether到Malkuth的能量沉降路径，寻找阻塞点）';
 
   const cardsDescription = cards.map((card, index) => 
-    `位置${index + 1}: ${card.name} (${card.nameZh}) - ${card.isUpright ? '正位' : '逆位'} - ${card.arcana}${card.suit ? ` - ${card.suit}` : ''}`
+    `第${index + 1}张: ${card.name} (${card.nameZh}) - ${card.isUpright ? '正位' : '逆位'} - ${card.arcana}${card.suit ? ` - ${card.suit}` : ''}`
   ).join('\n');
 
   return `
 用户问题：${question}
 使用牌系：${deck}
 解读模式：${modeDescription}
-
-抽到的六张牌：
+抽牌结果（线性抽取6张）：
 ${cardsDescription}
 
-请严格按照以下JSON格式返回解读结果，不要包含其他任何文字：
+请扮演一位世界级塔罗大师，严格按照以下【四个步骤】进行深度解读，并返回纯 JSON 格式：
 
+**第一步：快速判断问题类型（融入解读基调）**
+- 心态/关系类：侧重人物心态、互动模式。
+- 发展/决策类：侧重局势动能、行动路径。
+- 反思/成长类：侧重内在冲突、信念重组。
+
+**第二步：整体扫描与核心信息 (对应 summary 字段)**
+- 观察整体画面：主色调、元素分布（火水风土）、大牌数量、数字脉络。
+- **输出要求**：仅用 1-2 句话，一针见血地概括牌阵揭示的核心信息、能量状态或主要挑战。
+
+**第三步：结构化逐层解析 (对应 synthesis 字段的主体)**
+请将6张牌纳入严密的叙事逻辑中，采用以下三层结构（请在叙述时不要使用标题符号，直接分段陈述）：
+1. **现状与情境（重点分析前两张牌）**
+   - 分析前两张牌如何共同描绘了当前状况的缩影。
+   - 关注牌之间的数字序列、元素互动或叙事逻辑（例如：表面满足背后的僵局）。
+2. **核心驱动与深层结构（重点分析中间两张牌）**
+   - 将最明显的信息视为核心驱动力，另一张视为互动力量（挑战或资源）。
+   - 如果是人物牌：分析角色姿态和能量差异；如果是场景牌：分析内在动机与外部环境。
+   - 指出张力、和谐或转化点。
+3. **综合叙事与赋能建议 (对应 synthesis 字段的结尾)**
+   - 将三层解析串联成一个连贯、有因果逻辑的故事。
+   - **必须包含清晰、务实的建议**：
+     - **行动策略**：具体可以做什么？
+     - **心态调整**：应如何思考？
+     - **需警惕的陷阱**：应避免什么？
+
+**第四步：单牌微观视角 (对应 cardInterpretations 字段)**
+- 为每一张牌提供具体的微观分析。
+
+**输出规范与风格**
+- 风格：专业、冷静、共情、中立。使用“牌面显示……”、“能量倾向于……”、“这可能意味着……”等开放性语言，避免“一定会”、“必然”等绝对化断言。
+- **标点限制**：严格遵守！除空格、句号（。）、逗号（，）外，**不要使用任何其他标点符号**。不要用冒号、引号、括号、星号等。如果需要列举，请使用空格或自然分句。
+- Token限制：严格控制在3000 Tokens以内。
+
+**JSON 结构模板**：
 {
-  "summary": "总体摘要（30-50字，用最犀利的语言概括结论，例如：'看似机会在前，实则根基不稳，盲目行动必致溃败。'）",
-  "synthesis": "综合解读（400-600字。这是核心部分。请深入分析牌阵的整体能量场。必须结合元素互动（如火生土、水火不容）和数字逻辑。直接回答用户问题，明确指出事情的成败、走向或核心矛盾所在。严禁使用'可能'、'也许'等模糊词汇。）", 
+  "summary": "核心洞察（1-2句，最犀利的结论，无特殊标点）",
+  "synthesis": "纯文本。包含【结构化逐层解析】的三层逻辑，以及最后的【赋能建议】。内容需详实，逻辑严密，仅使用逗号句号和空格。",
   "cardInterpretations": [
     {
-      "cardId": "牌的唯一ID (必须与输入一致)",
-      "coreMeaning": "核心含义（4-6个字以内的精准关键词，作为标题，例如：'意志的崩塌'、'情感的满溢'）",
-      "contextAnalysis": "具体分析（100-150字/张。结合问题背景，解释'为什么'这张牌出现在这里意味着什么。分析牌面细节符号与问题的关联。）",
-      "actionAdvice": "行动建议（一句话，具体、可执行的操作性建议。）"
+      "cardId": "必须与输入ID一致",
+      "coreMeaning": "4-6个字的精准关键词（无标点）",
+      "contextAnalysis": "该牌在整体叙事中的微观分析 (约100字，无特殊标点)",
+      "actionAdvice": "一句具体的微观建议（无特殊标点）"
     }
   ]
 }
-
-极端重要要求（违反将判定为失败）：
-1. **紧扣问题**：如果用户问感情，全篇必须围绕感情分析，不要扯事业或自我成长。
-2. **拒绝废话**：全篇禁止使用"这张牌代表..."、"在塔罗牌中..."等教科书式凑字数的开场白。直接说："圣杯三逆位揭示了..."。
-3. **内容密度**：保证输出内容高密度、高价值。总字数控制在800-1000字左右，确保阅读体验既有深度又不冗长。
-4. **体系融合**：
-   ${mode === InterpretationMode.SANCIA 
-     ? '- 必须明确指出天位（大牌/不可控力）对人位（小牌/行动）的压制或支持。' 
-     : '- 必须结合卡巴拉路径的含义，分析意识流动的阻塞点。'}
-5. **绝对诚实**：如果牌面不好，直接指出危机，不要粉饰太平。
 `;
 };
 
@@ -159,20 +213,20 @@ const parseAIResponse = (response: string, request: ReadingRequest): FullReading
   try {
     const parsed = extractJSON(response);
       
-    // 确保每张牌都有正确的cardId
+    // 确保每张牌都有正确的cardId，并清洗所有文本字段
     const cardInterpretations: CardInterpretation[] = parsed.cardInterpretations.map((interp: any, index: number) => {
       const card = request.cards[index];
       return {
         cardId: interp.cardId || card?.id || `card_${index}`,
-        coreMeaning: interp.coreMeaning || `${card?.nameZh}的含义`,
-        contextAnalysis: interp.contextAnalysis || '分析中...',
-        actionAdvice: interp.actionAdvice || '建议...'
+        coreMeaning: cleanText(interp.coreMeaning || `${card?.nameZh}的含义`),
+        contextAnalysis: cleanText(interp.contextAnalysis || '分析中'),
+        actionAdvice: cleanText(interp.actionAdvice || '建议')
       };
     });
 
     return {
-      summary: parsed.summary || '解读完成',
-      synthesis: parsed.synthesis || '请参考详细解读',
+      summary: cleanText(parsed.summary || '解读完成'),
+      synthesis: cleanText(parsed.synthesis || '请参考详细解读'),
       cardInterpretations
     };
     
@@ -184,7 +238,6 @@ const parseAIResponse = (response: string, request: ReadingRequest): FullReading
 
 // --- Test/Rate Functions (For TarotRateTest.tsx) ---
 
-// Random topics to ensure variety and prevent caching/repetition
 const TEST_TOPICS = [
   "Major Arcana archetypes", "Suit of Wands", "Suit of Cups", "Suit of Swords", "Suit of Pentacles",
   "Court Cards personalities", "Numerology in Tarot", "Color symbolism", "Astrological associations",
@@ -197,25 +250,24 @@ export const generateTestQuestion = async (level: number, system: Interpretation
     let difficultyDesc = "";
     let focusArea = getRandomTopic();
     
-    // Define strict difficulty progression
     switch(level) {
         case 1:
-            difficultyDesc = "Level 1 (Novice): 基础知识。考察牌面主要元素、基本关键词、四元素属性。（例如：权杖代表什么元素？愚人的数字是多少？）";
-            focusArea = "Basic Keywords & Elements";
+            difficultyDesc = "Level 1 (Novice - 入门): 考察基础知识。牌面主要图像元素、基本关键词、基础四元素属性。问题应简单直接。";
+            focusArea = "Basic Imagery & Keywords";
             break;
         case 2:
-            difficultyDesc = "Level 2 (Apprentice): 进阶理解。考察正逆位的区别、两张牌的异同比较、简单的数字学含义。（例如：女祭司和皇后的母性特质有何不同？）";
+            difficultyDesc = "Level 2 (Apprentice - 学徒): 考察动态理解。正位与逆位的区别、两张牌的异同、1-10数字学的含义。";
             break;
         case 3:
-            difficultyDesc = "Level 3 (Adept): 实战应用。考察在特定场景（爱情/事业）中的具体解读，或三张牌的流变逻辑。";
+            difficultyDesc = "Level 3 (Adept - 熟手): 考察实战应用。在特定场景下某张牌的解读，或元素互动逻辑。";
             break;
         case 4:
-            difficultyDesc = "Level 4 (Master - 世界大师水准): 极高难度。考察神秘学对应关系。必须涉及：占星度数（Decans）、希伯来字母（Hebrew Alphabet）、生命之树路径（Paths 11-32）、金色黎明颜色阶梯（Color Scales）或透特塔罗的炼金符号。问题必须非常具体且生僻。";
-            focusArea = "Esoteric Correspondence (Qabalah/Astrology)";
+            difficultyDesc = "Level 4 (Master - 世界大师水准): 极高难度的神秘学考据。必须考察金色黎明（Golden Dawn）体系的底层严密数据。例如：占星度数（Decans）、希伯来字母及数值、生命之树路径编号、天使名号。";
+            focusArea = "Esoteric Correspondence (Qabalah/Astrology/Decans)";
             break;
         case 5:
-            difficultyDesc = "Level 5 (Grandmaster): 宗师境界。考察哲学综合与系统构建。涉及塔罗牌结构的底层逻辑、荣格心理学与炼金术的深度结合、跨体系比较（如透特与马赛的区别及其哲学根源）。";
-            focusArea = "Philosophy & System Synthesis";
+            difficultyDesc = "Level 5 (Grandmaster - 宗师): 考察哲学综合与体系比较。要求解释塔罗牌设计背后的神学/哲学原理。";
+            focusArea = "Philosophy, Theology & System Synthesis";
             break;
         default:
             difficultyDesc = "General Tarot Knowledge";
@@ -229,14 +281,15 @@ export const generateTestQuestion = async (level: number, system: Interpretation
     语言：中文
     
     指令：
-    1. 严格遵守难度定义。Level 4必须达到世界级大师的考核标准，问一些只有钻研过神秘学典籍（如《777之书》或《透特之书》）的人才知道的细节。
-    2. 题目要随机多变，不要重复常见问题。
+    1. **严格分级**。Level 4 必须是针对'世界级塔罗大师'的考题。
+    2. 题目要随机多变，拒绝陈词滥调。
     3. 这是一个简答题，不要提供选项。
     4. 请直接返回JSON。
     
     格式：{"question": "问题内容..."}`;
 
     try {
+        // Test questions use direct call usually as they are simpler/shorter
         const aiResponse = await callDeepSeek([
             { role: 'user', content: prompt }
         ], 1000, true);
@@ -250,27 +303,23 @@ export const generateTestQuestion = async (level: number, system: Interpretation
 
     } catch (e) {
         console.error("Test Gen Error:", e);
-        throw e; // Strictly throw error, no fallback
+        throw e;
     }
 };
 
 export const evaluateTestAnswer = async (question: string, userAnswer: string, level: number): Promise<TestEvaluation> => {
     const prompt = `
-      请扮演一位极其严格的塔罗主考官，评估这个答案。
+      请扮演一位极其严格的神秘学主考官（Master Occultist），评估考生的答案。
       
       难度等级：${level}
       问题："${question}"
       考生回答："${userAnswer}"
       
       评分标准（满分100，及格60）：
-      1. Level 1-3：主要看核心含义理解是否正确，逻辑是否通顺。
-      2. Level 4 (世界大师级)：评分必须极其严苛。
-         - 如果考察的是具体的神秘学对应（如某个希伯来字母、某个占星度数），答案必须完全精准。错一个字就是0分。
-         - 拒绝模棱两可的“直觉性”回答。如果没有答出技术细节，直接不及格。
-      3. Level 5：考察深度。需要看到对塔罗系统底层逻辑的洞见。
+      Level 4 为零容忍模式。如果考生回答模糊、错误、或者仅凭直觉作答而没有列出准确的神秘学术语，直接判定不及格。
       
       请返回纯JSON格式：
-      {"score": 数字, "feedback": "简短的中文评价，犀利地点评考生的水平"}
+      {"score": 数字, "feedback": "简短的中文评价"}
     `;
 
     try {
@@ -286,18 +335,15 @@ export const evaluateTestAnswer = async (question: string, userAnswer: string, l
             feedback: json.feedback || "评估完成"
         };
     } catch (e) {
-         throw e; // Strictly throw error
+         throw e;
     }
 };
 
 export const generateReferenceAnswer = async (question: string, level: number): Promise<string> => {
     const prompt = `请给出这个塔罗问题的标准答案（难度 ${level}）。问题："${question}"。中文，50字以内，精准概括。`;
     try {
-        const text = await callDeepSeek([
-            { role: 'user', content: prompt }
-        ], 500, false);
-        return text.trim();
+        return await callDeepSeek([{ role: 'user', content: prompt }], 500, false);
     } catch(e) {
-        throw e; // Strictly throw error
+        throw e;
     }
 };

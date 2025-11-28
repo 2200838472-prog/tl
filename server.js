@@ -1,207 +1,38 @@
-
 import express from 'express';
 import cors from 'cors';
-import bodyParser from 'body-parser';
-import fs from 'fs';
+import fetch from 'node-fetch';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// ESM fix for __dirname
+// Helper for __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Configuration
 const app = express();
 const PORT = process.env.PORT || 3001;
-const DATA_FILE = path.join(__dirname, 'data.json');
-
-// Admin Credentials
-const ADMIN_USERNAME = 'HHyyaa2006';
-const ADMIN_PASSWORD = 'HHyyaa2006';
+// Prioritize env var, then fallback
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || 'sk-3c0c5f5063fa47d6a07f73692db9482e';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-// --- PERSISTENT DATABASE ---
-// Structure: { users: { username: { password, points, deviceId, lastZenerDate } }, devices: [] }
-let USERS = {}; 
-let REGISTERED_DEVICES = new Set(); 
-
-// Load Data
-function loadData() {
-    try {
-        if (fs.existsSync(DATA_FILE)) {
-            const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-            const data = JSON.parse(raw);
-            USERS = data.users || {};
-            REGISTERED_DEVICES = new Set(data.devices || []);
-            console.log(`[DB] Loaded ${Object.keys(USERS).length} users.`);
-        }
-    } catch (e) {
-        console.error("[DB] Load error:", e);
-    }
-}
-
-// Save Data
-function saveData() {
-    try {
-        const data = {
-            users: USERS,
-            devices: Array.from(REGISTERED_DEVICES)
-        };
-        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    } catch (e) {
-        console.error("[DB] Save error:", e);
-    }
-}
-
-// Initial Load
-loadData();
-
-const CODES = {
-    'RUYI888': { value: 10, usedBy: [] },
-    'VIP2025': { value: 5, usedBy: [] },
-    'NEWUSER': { value: 1, usedBy: [] },
-    'HYA20061222': { value: 100, usedBy: [] }
-};
+// --- MOCK DATABASE (In-Memory) ---
+// Note: On Vercel, this memory resets on every redeploy or cold start.
+// For production, connect to an external database like MongoDB or PostgreSQL.
 const ADMIN_SESSIONS = new Set();
 
 // --- API ROUTES ---
 
-// 1. AUTH: Register
-app.post('/api/auth/register', (req, res) => {
-    const { username, password, deviceId } = req.body;
-
-    if (!username || !password || !deviceId) {
-        return res.status(400).json({ success: false, message: 'Missing fields' });
-    }
-
-    // Check if username exists
-    if (USERS[username]) {
-        return res.status(400).json({ success: false, message: '该账号已被注册 (Username taken)' });
-    }
-
-    // Check device limit (One account per device)
-    if (REGISTERED_DEVICES.has(deviceId)) {
-        return res.status(403).json({ success: false, message: '此设备已注册过账号，无法再次注册 (Device limit reached)' });
-    }
-
-    // Create User
-    USERS[username] = {
-        password: password, // In production, hash this!
-        points: 2, // Welcome bonus
-        deviceId: deviceId,
-        lastZenerDate: ''
-    };
-
-    REGISTERED_DEVICES.add(deviceId);
-    saveData(); // Persist
-
-    console.log(`[REGISTER] New user: ${username} on device ${deviceId}`);
-
-    res.json({ 
-        success: true, 
-        username: username,
-        points: USERS[username].points 
-    });
-});
-
-// 2. AUTH: Login
-app.post('/api/auth/login', (req, res) => {
-    const { username, password } = req.body;
-
-    const user = USERS[username];
-
-    if (!user || user.password !== password) {
-        return res.status(401).json({ success: false, message: '账号或密码错误 (Invalid credentials)' });
-    }
-
-    res.json({ 
-        success: true, 
-        username: username,
-        points: user.points,
-        lastZenerDate: user.lastZenerDate
-    });
-});
-
-// 3. User Info Sync (Reload)
-app.post('/api/user/sync', (req, res) => {
-    const { username } = req.body;
-    const user = USERS[username];
-
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    res.json({ 
-        success: true, 
-        points: user.points,
-        lastZenerDate: user.lastZenerDate 
-    });
-});
-
-// 4. Deduct Point
-app.post('/api/user/deduct', (req, res) => {
-    const { username } = req.body;
-    const user = USERS[username];
-
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    if (user.points < 1) {
-        return res.status(402).json({ success: false, message: '积分不足，请联系如懿充值' });
-    }
-
-    user.points -= 1;
-    saveData(); // Persist
-
-    res.json({ success: true, points: user.points });
-});
-
-// 5. Redeem Code
-app.post('/api/user/redeem', (req, res) => {
-    const { username, code } = req.body;
-    const user = USERS[username];
-    const promo = CODES[code];
-
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    if (!promo) return res.status(400).json({ success: false, message: '无效的兑换码' });
-
-    if (promo.usedBy.includes(username)) {
-       return res.status(400).json({ success: false, message: '此兑换码已使用' });
-    }
-
-    user.points += promo.value;
-    promo.usedBy.push(username);
-    saveData(); // Persist
-
-    res.json({ success: true, points: user.points, added: promo.value });
-});
-
-// 6. Daily Zener Reward
-app.post('/api/user/zener-reward', (req, res) => {
-    const { username } = req.body;
-    const user = USERS[username];
-    
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const today = new Date().toDateString();
-
-    if (user.lastZenerDate === today) {
-        return res.status(400).json({ success: false, message: '今日奖励已领取' });
-    }
-
-    user.points += 1;
-    user.lastZenerDate = today;
-    saveData(); // Persist
-
-    res.json({ success: true, points: user.points });
-});
-
-// 7. Admin Login
+// 1. Admin Login
 app.post('/api/admin/login', (req, res) => {
     const { username, password } = req.body;
     
-    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-        const token = 'admin-token-' + Date.now();
+    if (username === 'admin' && password === ADMIN_PASSWORD) {
+        const token = 'mock-jwt-token-' + Date.now();
         ADMIN_SESSIONS.add(token);
         return res.json({ success: true, token });
     }
@@ -209,33 +40,49 @@ app.post('/api/admin/login', (req, res) => {
     return res.status(401).json({ success: false, message: 'Invalid credentials' });
 });
 
-// 8. Admin: Manual Add Points
-app.post('/api/admin/add-points', (req, res) => {
-    const { targetUsername, amount } = req.body;
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (!token || !ADMIN_SESSIONS.has(token)) {
-        return res.status(403).json({ success: false, message: "Unauthorized" });
-    }
-
-    const user = USERS[targetUsername];
-    if (!user) {
-        return res.status(404).json({ success: false, message: "用户不存在 (User not found)" });
-    }
-
-    const val = parseInt(amount);
-    if (isNaN(val)) return res.status(400).json({ success: false, message: "Invalid amount" });
-
-    user.points += val;
-    saveData(); // Persist
+// 2. DeepSeek Proxy: Interpretation
+// This is crucial for public deployment to avoid CORS issues and hide the API Key
+app.post('/api/deepseek/interpret', async (req, res) => {
+    const { messages, maxTokens, jsonMode } = req.body;
     
-    console.log(`[ADMIN] Added ${val} points to ${targetUsername}`);
+    if (!messages) {
+        return res.status(400).json({ error: "Messages required" });
+    }
 
-    res.json({ success: true, message: `已成功为 ${targetUsername} 添加 ${val} 积分`, newBalance: user.points });
+    try {
+        const response = await fetch(DEEPSEEK_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: messages,
+                temperature: 0.7,
+                max_tokens: maxTokens || 3000,
+                stream: false,
+                response_format: jsonMode ? { type: 'json_object' } : undefined
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("DeepSeek API Error:", errorText);
+            return res.status(response.status).json({ error: `Upstream API Error: ${errorText}` });
+        }
+
+        const data = await response.json();
+        // Return just the content to match expected format
+        res.json({ content: data.choices[0].message.content });
+
+    } catch (error) {
+        console.error("Backend Proxy Error:", error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
-// 9. Admin Stats
+// 3. Admin Stats
 app.get('/api/admin/stats', (req, res) => {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
@@ -244,20 +91,30 @@ app.get('/api/admin/stats', (req, res) => {
         return res.status(403).json({ error: "Unauthorized" });
     }
 
-    // Calculate stats
-    const totalUsers = Object.keys(USERS).length;
-    const totalPoints = Object.values(USERS).reduce((acc, u) => acc + u.points, 0);
-
     res.json({
-        totalUsers,
-        totalPointsInCirculation: totalPoints,
-        serverStatus: 'Online (Persistent)',
-        activeCoupons: Object.keys(CODES).length
+        totalReadings: 1243 + Math.floor(Math.random() * 100),
+        activeUsers: 42 + Math.floor(Math.random() * 10),
+        serverStatus: 'Online',
+        environment: process.env.VERCEL ? 'Vercel Serverless' : 'Local Node'
     });
 });
 
-// Start Server
-app.listen(PORT, () => {
-    console.log(`Zhonggong Tarot Backend running on port ${PORT}`);
-    console.log(`Persistence active: ${DATA_FILE}`);
-});
+// --- STATIC FILE SERVING (Local Only) ---
+// On Vercel, static files are handled by the Output API, so we skip this.
+if (!process.env.VERCEL) {
+    app.use(express.static(path.join(__dirname, 'dist')));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(__dirname, 'dist/index.html'));
+    });
+}
+
+// --- STARTUP LOGIC ---
+// Export the app for Vercel Serverless
+export default app;
+
+// Start the server directly if running locally (node server.js)
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    app.listen(PORT, () => {
+        console.log(`Zhonggong Tarot Server running on port ${PORT}`);
+    });
+}

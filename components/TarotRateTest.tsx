@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { playSound } from '../utils/soundEngine';
 import { generateTestQuestion, evaluateTestAnswer, generateReferenceAnswer, TestQuestion } from '../services/deepseekService';
@@ -6,17 +5,12 @@ import { InterpretationMode } from '../types';
 
 interface TarotRateTestProps {
   onBack: () => void;
-  isLoggedIn: boolean;
-  username: string;
-  points: number;
-  refreshData: () => void;
-  onRequireLogin: () => void;
 }
 
 const SKIP_CODE = "20061222";
 const PEEK_CODE = "12222006";
 
-const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, username, points, refreshData, onRequireLogin }) => {
+const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack }) => {
   const [unlockedLevel, setUnlockedLevel] = useState<number>(1);
   const [currentLevel, setCurrentLevel] = useState<number>(1);
   const [loading, setLoading] = useState(false);
@@ -28,7 +22,6 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
   const [testMode, setTestMode] = useState<InterpretationMode>(InterpretationMode.SANCIA);
 
   useEffect(() => {
-    // Only load local progress, but actual unlocking of new tests costs points
     const saved = localStorage.getItem('zg_tarot_level');
     if (saved) {
       setUnlockedLevel(parseInt(saved, 10));
@@ -46,67 +39,42 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
         playSound('click');
         return;
     }
-
-    if (!isLoggedIn) {
-        onRequireLogin();
+    
+    // Level 6 Special Entry logic
+    if (level === 6) {
+        setCurrentLevel(6);
+        setView('endgame');
+        playSound('chime');
         return;
     }
 
-    // Attempt to deduct point for starting a test
+    setCurrentLevel(level);
+    setLoading(true);
+    setView('test');
+    setAnswer("");
+    setFeedback("");
+    setScore(0);
+    setQuestion(null);
+    
+    playSound('slide');
+    
     try {
-        const res = await fetch('/api/user/deduct', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username })
-        });
-        const data = await res.json();
-        
-        if (!data.success) {
-            alert(data.message || "Insufficient Points");
-            return;
-        }
-        
-        // Success deduction, update points locally
-        refreshData();
-        
-        // Special Level 6
-        if (level === 6) {
-            setCurrentLevel(6);
-            setView('endgame');
-            playSound('chime');
-            return;
-        }
-
-        setCurrentLevel(level);
-        setLoading(true);
-        setView('test');
-        setAnswer("");
-        setFeedback("");
-        setScore(0);
-        setQuestion(null);
-        
-        playSound('slide');
-        
-        try {
-            const q = await generateTestQuestion(level, testMode);
-            setQuestion(q);
-        } catch (e) {
-            console.error(e);
-            setFeedback("Network Error");
-        } finally {
-            setLoading(false);
-        }
-
-    } catch(e) {
-        alert("Server Error");
+        const q = await generateTestQuestion(level, testMode);
+        setQuestion(q);
+    } catch (e) {
+        console.error(e);
+        setFeedback("Network Error");
+    } finally {
+        setLoading(false);
     }
   };
 
   const handleSubmit = async () => {
     if (!answer.trim()) return;
+
     const rawAnswer = answer.trim();
 
-    // Cheat Codes
+    // CHEAT CODE: Unlock All
     if (rawAnswer === SKIP_CODE) {
         playSound('chime');
         saveProgress(6); 
@@ -114,6 +82,8 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
         setView('endgame');
         return;
     }
+
+    // CHEAT CODE: Peek Answer
     if (rawAnswer === PEEK_CODE) {
         if (!question) return;
         playSound('reveal');
@@ -140,6 +110,7 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
         setFeedback(result.feedback);
         setScore(result.score);
         
+        // STRICT 60% RULE
         if (result.passed) { 
             playSound('chime');
             setView('success');
@@ -148,6 +119,7 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
             }
         } else {
             playSound('click');
+            // Stay in evaluating state to show failure
         }
     } catch (e) {
         setFeedback("System Error");
@@ -162,6 +134,7 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
       return titles[lvl] || "Unknown";
   };
 
+  // Render Screens
   const renderIntro = () => (
       <div className="max-w-3xl mx-auto w-full animate-fade-in flex flex-col items-center">
           <div className="text-center mb-12">
@@ -169,7 +142,6 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
                  <h2 className="text-3xl font-serif font-bold text-ink tracking-[0.2em]">等级评定</h2>
               </div>
               <p className="text-stone-400 font-serif text-sm tracking-widest uppercase">The Ordeal of Wisdom</p>
-              <p className="text-xs text-stone-500 mt-2">Cost: 1 Point per Attempt</p>
           </div>
 
           <div className="flex gap-8 mb-16">
@@ -210,6 +182,8 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
                           <span className={`font-serif text-xs font-bold tracking-[0.2em] uppercase ${isLocked ? 'text-stone-300' : 'text-stone-600 group-hover:text-cinnabar'}`}>
                               {getLevelTitle(lvl)}
                           </span>
+
+                          {isLocked && <div className="absolute top-3 right-3 text-[10px] text-stone-300">🔒</div>}
                       </button>
                   );
               })}
@@ -254,6 +228,7 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
                     className="w-full bg-stone-50/50 p-6 rounded-sm border border-stone-200 focus:border-cinnabar focus:bg-white focus:outline-none min-h-[200px] font-serif text-ink text-lg leading-loose resize-none transition-all placeholder:text-stone-300 placeholder:italic"
                     spellCheck={false}
                   />
+                  
                   {loading && view === 'evaluating' && (
                       <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-10">
                           <div className="text-cinnabar font-serif font-bold tracking-[0.3em] animate-pulse">EVALUATING</div>
@@ -268,6 +243,7 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
                   >
                     Abdicate
                   </button>
+                  
                   <button
                     onClick={handleSubmit}
                     disabled={loading || !answer.trim()}
@@ -277,6 +253,8 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
                   </button>
               </div>
           </div>
+
+          {/* Result Feedback Block */}
           {view === 'evaluating' && !loading && (
                <div className="mt-6 bg-stone-900 text-stone-300 p-6 shadow-xl animate-fade-in border-l-4 border-cinnabar">
                    <div className="flex items-start gap-4">
@@ -298,14 +276,11 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
                          setFeedback(""); 
                          setAnswer("");
                          setScore(0);
-                         // Note: We don't restart logic to charge points again immediately for retry? 
-                         // For simplicity here, retry free, but normally should charge.
-                         // Let's redirect to intro to force point charge logic
-                         setView('intro');
+                         startLevel(currentLevel); 
                      }}
                      className="mt-6 w-full py-3 bg-stone-800 hover:bg-stone-700 text-white text-xs font-bold uppercase tracking-widest transition-colors"
                    >
-                       Return to Menu
+                       Attempt Again
                    </button>
                </div>
           )}
@@ -317,15 +292,26 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
           <div className="w-20 h-20 border-2 border-cinnabar rounded-full flex items-center justify-center text-cinnabar text-4xl mb-8 shadow-[0_0_30px_rgba(196,30,58,0.2)]">
               ✦
           </div>
+          
           <h2 className="text-4xl font-serif font-bold text-ink mb-2">Passed</h2>
           <span className="text-stone-400 text-xs font-sans uppercase tracking-[0.3em] mb-8">Score {score} / 100</span>
+
           <div className="bg-white p-6 border border-stone-100 shadow-sm mb-10 w-full relative">
              <div className="absolute top-0 left-1/2 -translate-x-1/2 -mt-3 bg-paper px-2 text-cinnabar text-xl">❝</div>
              <p className="text-stone-600 font-serif italic leading-relaxed text-sm">
                 {feedback}
              </p>
           </div>
+          
           <div className="flex flex-col w-full gap-4">
+              {currentLevel < 6 && (
+                  <button 
+                    onClick={() => startLevel(currentLevel + 1)}
+                    className="w-full py-4 bg-ink text-white font-serif font-bold tracking-[0.2em] hover:bg-cinnabar transition-all shadow-md group"
+                  >
+                    NEXT LEVEL <span className="inline-block transition-transform group-hover:translate-x-1">→</span>
+                  </button>
+              )}
               <button 
                 onClick={() => setView('intro')}
                 className="w-full py-3 text-stone-400 hover:text-ink text-xs font-serif tracking-widest transition-colors"
@@ -339,12 +325,20 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
   const renderEndgame = () => (
       <div className="flex-1 flex flex-col items-center justify-center animate-fade-in relative w-full max-w-4xl mx-auto">
           <div className="absolute inset-0 bg-noise opacity-30 pointer-events-none"></div>
+          
           <div className="relative z-10 text-center">
               <div className="text-[12rem] md:text-[16rem] leading-none text-stone-100 font-serif font-bold absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -z-10 select-none">
                   ⚛
               </div>
+              
               <h2 className="text-6xl md:text-8xl font-serif font-black text-ink mb-6 tracking-widest mix-blend-multiply">归一</h2>
               <p className="text-xl md:text-2xl font-serif text-cinnabar mb-12 tracking-[0.5em] uppercase">Unity</p>
+              
+              <div className="max-w-md mx-auto space-y-6 text-stone-600 font-serif leading-loose">
+                  <p>"The journey is the destination."</p>
+                  <p className="text-sm italic">You have transcended the need for tests.</p>
+              </div>
+
               <button 
                 onClick={() => setView('intro')}
                 className="mt-20 px-10 py-3 border border-stone-300 text-stone-400 hover:text-ink hover:border-ink transition-all text-xs font-bold uppercase tracking-[0.3em]"
@@ -357,6 +351,7 @@ const TarotRateTest: React.FC<TarotRateTestProps> = ({ onBack, isLoggedIn, usern
 
   return (
     <div className="min-h-screen bg-paper pb-20 flex flex-col">
+        {/* Simplified Nav */}
         <nav className="p-6 sticky top-0 z-40 bg-paper/95 backdrop-blur-md border-b border-stone-200/60 flex items-center justify-between">
              <div className="flex items-center gap-4 cursor-pointer group" onClick={onBack}>
                 <span className="text-xl text-cinnabar font-serif transition-transform group-hover:-translate-x-1">←</span>
