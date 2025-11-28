@@ -6,10 +6,11 @@ export default defineConfig(({ mode }) => {
     // Load env file based on `mode` in the current working directory.
     const env = loadEnv(mode, (process as any).cwd(), '');
     
-    // Use the key from env, or fallback to the provided key
-    const deepseekKey = env.DEEPSEEK_API_KEY || 'sk-3c0c5f5063fa47d6a07f73692db9482e';
+    // Support VITE_ prefix for Vercel/Client-side env vars, allow fallback to standard or hardcoded
+    const deepseekKey = env.VITE_DEEPSEEK_API_KEY || env.DEEPSEEK_API_KEY || 'sk-3c0c5f5063fa47d6a07f73692db9482e';
 
     return {
+      base: '/',
       server: {
         port: 3000,
         host: '0.0.0.0',
