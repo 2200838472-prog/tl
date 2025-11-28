@@ -8,60 +8,45 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;500;700;900&family=Ma+Shan+Zheng&family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;700;900&family=Inter:wght@300;400;600&family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
     <script>
       tailwind.config = {
         theme: {
           extend: {
             colors: {
-              paper: '#fdfbf7',   // Rice Paper White
-              ink: '#1a1a1a',     // Deep Ink Black
-              cinnabar: '#c41e3a', // Chinese Seal Red
-              cinnabarDim: '#a01830',
-              gold: '#d4af37',    // Classic Gold accents
+              paper: '#FFFFFF',   // Pure White for International Style
+              ink: '#000000',     // Pure Black
+              cinnabar: '#D93025', // International Red (Bold, Alert)
+              cinnabarDim: '#B91C1C',
+              stone: {
+                50: '#F9FAFB',
+                100: '#F3F4F6',
+                200: '#E5E7EB',
+                300: '#D1D5DB',
+                400: '#9CA3AF',
+                500: '#6B7280',
+                800: '#1F2937',
+                900: '#111827',
+              }
             },
             fontFamily: {
-              serif: ['"Noto Serif SC"', 'serif'], // Songti style
+              serif: ['"Noto Serif SC"', 'serif'], // Content & Headings
+              sans: ['"Inter"', 'sans-serif'],      // UI & Functional Text
               display: ['"Cinzel"', 'serif'],
-              seal: ['"Ma Shan Zheng"', 'cursive'],
-            },
-            backgroundImage: {
-              'paper-texture': "url('https://www.transparenttextures.com/patterns/cream-paper.png')",
-              'noise': "url('https://www.transparenttextures.com/patterns/stardust.png')",
             },
             animation: {
-              'stamp-in': 'stampIn 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards',
-              'ink-bleed': 'inkBleed 2s ease-out forwards',
-              'fade-in': 'fadeIn 1.2s ease-in-out forwards',
-              'float': 'float 6s ease-in-out infinite',
-              'slide-up': 'slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards',
-              'ripple': 'ripple 0.6s linear forwards',
+              'fade-in': 'fadeIn 0.8s ease-out forwards',
+              'slide-up': 'slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+              'pulse-slow': 'pulse 3s infinite',
             },
             keyframes: {
-              stampIn: {
-                '0%': { transform: 'scale(3)', opacity: '0' },
-                '50%': { opacity: '1' },
-                '100%': { transform: 'scale(1)', opacity: '1' },
-              },
-              inkBleed: {
-                '0%': { filter: 'blur(0px)', transform: 'scale(1)' },
-                '100%': { filter: 'blur(0.5px)', transform: 'scale(1.02)' },
-              },
               fadeIn: {
                 '0%': { opacity: '0' },
                 '100%': { opacity: '1' },
               },
               slideUp: {
-                '0%': { transform: 'translateY(20px)', opacity: '0' },
+                '0%': { transform: 'translateY(40px)', opacity: '0' },
                 '100%': { transform: 'translateY(0)', opacity: '1' },
-              },
-              float: {
-                '0%, 100%': { transform: 'translateY(0)' },
-                '50%': { transform: 'translateY(-8px)' },
-              },
-              ripple: {
-                '0%': { transform: 'scale(0)', opacity: '0.4' },
-                '100%': { transform: 'scale(4)', opacity: '0' },
               }
             }
           }
@@ -70,31 +55,27 @@
     </script>
     <style>
       body {
-        background-color: #fdfbf7;
-        color: #1a1a1a;
+        background-color: #FFFFFF;
+        color: #000000;
         overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
       }
-      /* Custom Scrollbar */
+      /* Clean Scrollbar */
       ::-webkit-scrollbar {
-        width: 6px;
+        width: 4px;
       }
       ::-webkit-scrollbar-track {
-        background: #fdfbf7;
+        background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: #c41e3a;
-        border-radius: 3px;
+        background: #D93025;
       }
       .card-3d {
-        transition: transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1);
         transform-style: preserve-3d;
       }
       .perspective-1000 {
         perspective: 1000px;
-      }
-      .text-vertical {
-        writing-mode: vertical-rl;
-        text-orientation: upright;
       }
     </style>
   <script type="importmap">
@@ -103,7 +84,14 @@
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0"
+    "path": "https://aistudiocdn.com/path@^0.12.7",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "vite": "https://aistudiocdn.com/vite@^7.2.4",
+    "express": "https://aistudiocdn.com/express@^5.1.0",
+    "body-parser": "https://aistudiocdn.com/body-parser@^2.2.1",
+    "cors": "https://aistudiocdn.com/cors@^2.8.5",
+    "url": "https://aistudiocdn.com/url@^0.11.4",
+    "fs": "https://aistudiocdn.com/fs@^0.0.1-security"
   }
 }
 </script>

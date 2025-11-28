@@ -8,35 +8,41 @@ const Splash: React.FC<SplashProps> = ({ onComplete }) => {
   const [stage, setStage] = useState(0);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setStage(1), 500); // Start Stamp
-    const t2 = setTimeout(() => setStage(2), 3500); // Fade out
-    const t3 = setTimeout(() => onComplete(), 4500); // Done
+    // Wait for fonts to be ready to prevent "icon change/flash" issue
+    // Added timeout race to ensure it loads even if fonts are blocked (e.g. in China)
+    const fontReadyPromise = document.fonts.ready;
+    const timeoutPromise = new Promise(resolve => setTimeout(resolve, 2000));
 
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
+    Promise.race([fontReadyPromise, timeoutPromise]).then(() => {
+        const t0 = setTimeout(() => setStage(1), 300); // Increased initial delay for stability
+        const t1 = setTimeout(() => setStage(2), 3500); // Fade out
+        const t2 = setTimeout(() => onComplete(), 4500); // Unmount
+
+        return () => {
+          clearTimeout(t0);
+          clearTimeout(t1);
+          clearTimeout(t2);
+        };
+    });
   }, [onComplete]);
 
-  if (stage === 2) return (
-     <div className="fixed inset-0 z-[100] bg-paper flex items-center justify-center transition-opacity duration-1000 opacity-0 pointer-events-none"></div>
-  );
-
   return (
-    <div className="fixed inset-0 z-[100] bg-paper flex items-center justify-center overflow-hidden">
+    <div className={`fixed inset-0 z-[100] bg-paper flex items-center justify-center overflow-hidden transition-opacity duration-1000 ${stage === 2 ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
       <div className="relative flex flex-col items-center">
         
         {/* Ink Spread Effect (Background) */}
         <div className={`absolute w-[400px] h-[400px] bg-black rounded-full mix-blend-multiply filter blur-xl opacity-10 transition-transform duration-[3s] ease-out ${stage >= 1 ? 'scale-100' : 'scale-0'}`}></div>
 
         {/* Square Seal Container */}
-        <div className={`relative w-48 h-48 md:w-64 md:h-64 border-8 border-cinnabar flex items-center justify-center bg-cinnabar/5 rounded-sm shadow-xl transform origin-center transition-all duration-700 cubic-bezier(0.22, 1, 0.36, 1) ${stage >= 1 ? 'opacity-100 scale-100' : 'opacity-0 scale-[3]'}`}>
+        {/* Changed initial scale from 3 to 1.5 to reduce dramatic layout shifts that might look like glitches */}
+        {/* Added will-change-transform for smoother rendering */}
+        <div className={`relative w-48 h-48 md:w-64 md:h-64 border-8 border-cinnabar flex items-center justify-center bg-cinnabar/5 rounded-sm shadow-xl transform origin-center transition-all duration-700 cubic-bezier(0.22, 1, 0.36, 1) will-change-transform ${stage >= 1 ? 'opacity-100 scale-100' : 'opacity-0 scale-150'}`}>
             
             {/* Inner Border with roughness */}
             <div className="absolute inset-3 border border-cinnabar opacity-60 border-dashed"></div>
             
             {/* Main Character - Songti (Serif), Ink Style */}
+            {/* Ensure font-serif is applied directly here to override any system defaults immediately */}
             <div className={`text-cinnabar font-serif font-black text-7xl md:text-8xl relative z-10 tracking-[0.2em] flex flex-col items-center justify-center leading-none ${stage >= 1 ? 'animate-ink-bleed' : ''}`}>
                <span className="block mb-2 filter blur-[0.5px]">中</span>
                <span className="block filter blur-[0.5px]">宫</span>

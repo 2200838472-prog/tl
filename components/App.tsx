@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import Splash from './components/Splash';
 import Footer from './components/Footer';
